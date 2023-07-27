@@ -1,0 +1,243 @@
+// USAGE
+// for use with dbdiagram.io
+// Use DBML to define your database structure
+// Docs: https://dbml.dbdiagram.io/docs
+
+// DOMAINS
+// applications
+// customers (onboarding/status)
+// accounts (many accounts per cust)
+// cards (cust can have multiple cards)
+// institutions
+// payments - bill pay
+// funding accounts from external institutions
+
+// QUESTIONS THAT THE DESIGN SHOULD BE ABLE TO ANSWER
+//a. What is the total dollar amount of debit card transactions on this platform for a given week? 
+//b. Who are the largest customers by payment volume? 
+//c. What is the total end-of-week balance across all accounts at Bank Co? 
+
+// ASSUMPTIONS
+// There will always be a record in dim_branch that specifies a head office for the institution
+// Some banks have different SWIFT codes by branch
+// Some banks only have one SWIFT code for all branches
+// There will be accounts in dim_accounts that are internal to the bank 
+// Cards are tied to individual account owners - in other words, if a business has multiple owners, each owner could have a different card
+// Account cannot be in overdraft
+// Businesses own the accounts - not the individual business owners
+
+Project banking_data_warehouse {
+  Note: 'Outlines a theoretical layout for a Data Warehouse that focuses around the banking sector for business banking'
+}
+
+Table dim_business {
+  business_key uuid (surrogate key)
+  business_id integer
+  business_dba_name varchar
+  business_legal_name varchar
+  address_full varchar
+  address_street varchar
+  address_unit_po_box_number varchar
+  address_city varchar
+  address_state_province varchar
+  address_zip_postal varchar
+  address_country varchar
+  mailing_address_full varchar
+  mailing_address_street varchar
+  mailing_address_unit_po_box_number varchar
+  mailing_address_city varchar
+  mailing_address_state_province varchar
+  mailing_address_zip_postal varchar
+  mailing_address_country varchar
+  primary_contact_names array
+  phone_landline varchar
+  phone_cell varchar
+  fax_number varchar
+  email_address varchar
+  application_number varchar
+  application_status varchar
+  application_date timestamp
+  application_approved_at timestamp
+  application_denied_at timestamp
+  is_onboarded bool
+  oboarded_at timestamp
+  is_suspended bool
+  suspended_at timestamp
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Table dim_business_payees {
+  business_payees_key uuid (surrogate key)
+  business_payee_id integer
+  business_id integer
+  payee_name varchar
+  payee_account_number varchar
+  payee_swift_code varchar
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+  
+}
+
+Table dim_business_owner {
+  business_owner_key uuid (surrogate key)
+  business_owner_id integer
+  business_id integer
+  owner_name varchar
+  owner_legal_name varchar
+  address_full varchar
+  address_street varchar
+  address_unit_po_box_number varchar
+  address_city varchar
+  address_state_province varchar
+  address_zip_postal varchar
+  address_country varchar
+  phone_landline varchar
+  phone_cell varchar
+  fax_number varchar
+  email varchar
+  date_of_birth timestamp
+  social_security_number_masked varchar // if this is even needed in the warehouse you would want this obfuscated like XXX XXX 1234
+  ownership_percentage decimal(3,2) // ie: 51.50
+  is_verified bool
+  verified_at timestamp
+  is_suspended bool
+  suspended_at timestamp
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Table dim_recurring_transfer {
+  recurring_transfer_key uuid (surrogate key)
+  recurring_transfer_id integer
+  business_id integer
+  nickname varchar
+  start_date timestamp
+  end_date timestamp
+  from_account_id integer
+  to_account_id integer
+  amount decimal(9,4) // supports up to 999 million - 999,999,999.9999
+  business_payee_id integer
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Ref: dim_business.business_id < dim_business_payees.business_id
+Ref: dim_business.business_id < dim_business_owner.business_id
+Ref: dim_business.business_id < dim_recurring_transfer.business_id
+Ref: dim_recurring_transfer.from_account_id > dim_accounts.account_id
+Ref: dim_recurring_transfer.to_account_id > dim_accounts.account_id
+Ref: dim_recurring_transfer.business_payee_id > dim_business_payees.business_payee_id
+
+
+Table dim_accounts {
+  account_key uuid (surrogate key)
+  account_id integer
+  business_id integer
+  institution_id integer
+  branch_id integer
+  account_number varchar
+  transit_number varchar
+  institution_number varchar
+  account_name varchar
+  account_type varchar
+  account_status varchar
+  account_currency varchar
+  last_balance decimal(15,6) // supports up to 999 trillion dollars - 999,999,999,999,999.999999
+  last_balance_timestamp timestamp
+  is_external_account bool
+  opened_at timestamp
+  closed_at timestamp
+  hold_at timestamp
+  hold_desc varchar
+  suspended_at timestamp
+  suspended_desc varchar
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Table dim_card {
+  card_key uuid (surrogate key)
+  card_id integer
+  business_owner_id integer
+  card_issued_to_name varchar
+  account_id integer
+  card_type varchar
+  card_nickname varchar
+  issued_at timestamp
+  suspended_at timestamp
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Table dim_institution {
+  institution_key uuid (surrogate key)
+  institution_id integer
+  name varchar
+  description varchar
+  country varchar
+  institution_number varchar
+}
+
+Table dim_branch {
+  branch_key uuid (surrogate_key)
+  branch_id integer
+  institution_id integer
+  branch_number varchar
+  branch_swift_code varchar
+  branch_name varchar
+  branch_address_full varchar
+  branch_phone varchar
+  branch_contact_name varchar
+  branch_contact_phone varchar
+  branch_contact_email varchar
+  branch_contact_fax varchar
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Ref: dim_business.business_id < dim_accounts.business_id
+Ref: dim_card.account_id <> dim_accounts.account_id
+Ref: dim_business_owner.business_owner_id - dim_card.business_owner_id
+Ref: dim_institution.institution_id < dim_accounts.institution_id
+Ref: dim_branch.institution_id - dim_institution.institution_id
+Ref: dim_branch.branch_id < dim_accounts.branch_id
+
+Table fact_transaction {
+  transaction_key uuid (surrogate key)
+  transaction_id bigint
+  parent_transaction_id bigint
+  business_key varchar
+  card_key varchar
+  business_payee_key varchar
+  recurring_transfer_key varchar
+  from_account_key varchar
+  to_account_key varchar
+  amount decimal(9,4) // supports up to 999 million - 999,999,999.9999
+  transaction_status varchar
+  transaction_type varchar
+  transaction_created_at timestamp
+  transaction_completed_at timestamp
+  transaction_cancelled_at timestamp
+  transaction_cancelled_reason varchar
+  is_pending bool
+  pending_reason varchar
+  is_internal bool
+  created_at timestamp
+  updated_at timestamp
+  deleted_at timestamp
+}
+
+Ref: fact_transaction.business_key > dim_business.business_key
+Ref: fact_transaction.card_key > dim_card.card_key
+Ref: fact_transaction.business_payee_key > dim_business_payees.business_payees_key
+Ref: fact_transaction.recurring_transfer_key > dim_recurring_transfer.recurring_transfer_key
+Ref: fact_transaction.from_account_key > dim_accounts.account_key
+Ref: fact_transaction.to_account_key > dim_accounts.account_key
